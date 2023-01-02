@@ -1,45 +1,11 @@
 #!/bin/bash
 
-# Author: griznog
-# Purpose: 
-#   1. Detect nVidia GPUs
-#   2. Install drivers
-#   3. Set up /dev/nvidia* entries
-#   4. Set up and start the persistence daemon
-#   5. Dump detected/configured configuration
-#
-
-# VMware nodes with GPU passthru
-# Host Settings:
-#   Set host GPU mode to Shared Direct in Graphics tab when 
-#   setting up pass-thru.
-#
-# Guest settings:
-#   Boot Options | Firmware = EFI
-#   svga.present = FALSE  (note this disables the console)
-#   hypervisor.cpuid.v0 = FALSE
-#   pciPassthru.64bitMMIOSizeGB = 64
-#   pciPassthru.use64bitMMIO = TRUE
-#
-
-# Collecting Card Database.
-#   clush -w GPUNODELIST lspci -nn | grep -i nvidia | awk '!($1=$2="")'  | sort | uniq -c | sort
-#   clush -w GPUNODELIST "nvidia-smi -q | grep 'Product Name'" | awk '!($1=$2="")' | sort | uniq -c | sort
-
-
-# Get updated fabric manager and other rpms at
-# https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/
-
+# Source our common warewulf functions
 [[ -f /warewulf/etc/functions ]] && source /warewulf/etc/functions || exit 1
 
 # Script starts here.
 # Table with all our known/supported GPU cards.
-declare -g -A CUDA_CARDDB
-CUDA_CARDDB['10de:2204']="GA102 [GeForce RTX 3090]"
-CUDA_CARDDB['10de:20b0']="GA100 [A100 SXM4 40GB]"
-CUDA_CARDDB['10de:2235']="GA102GL [A40]"
-CUDA_CARDDB['10de:2230']="GA102GL [RTX A6000]"
-CUDA_CARDDB['10de:1db5']="Tesla V100 SXM2 32GB"
+[[ -f etc/warewulf-overlay-gpu-carddb ]] && source /warewulf/etc/warewulf-overlay-gpu-carddb || die "/warewulf/etc/warewulf-overlay-gpu-carddb not found."
 
 # Cuda Driver location. Use a default for now, maybe expand to selectively
 # install a specific version per node/category/... later.
@@ -122,9 +88,11 @@ function cuda_install_driver_runfile () {
   return $retval
 }
 
+
 function cuda_install_driver_dnf () {
   local retval=0
   ARCH=$( /bin/arch )
+  # TODO: should detect this
   distribution=rhel8
   dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/$distribution/${ARCH}/cuda-$distribution.repo
   dnf module install nvidia-driver:latest/fm
