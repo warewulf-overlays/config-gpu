@@ -5,21 +5,34 @@
 
 # Script starts here.
 # Table with all our known/supported GPU cards.
-[[ -f etc/warewulf-overlay-gpu-carddb ]] && source /warewulf/etc/warewulf-overlay-gpu-carddb || die "/warewulf/etc/warewulf-overlay-gpu-carddb not found."
+CARDDB_FILE=/warewulf/etc/warewulf-overlay-gpu-carddb
+[[ -f ${CARDDB_FILE} ]] && source ${CARDDB_FILE} || die "$0: ${CARDDB_FILE} not found."
+
+# Make sure we have yq installed.
+YQ=$(which yq 2> /dev/null) || die "$0: Please install yq: https://github.com/mikefarah/yq"
 
 # Cuda Driver location. Use a default for now, maybe expand to selectively
 # install a specific version per node/category/... later.
 CUDA_DRIVER_PATH=/warewulf/shared/drivers/cuda/
-#CUDA_VERSION=495.29.05
-CUDA_VERSION=515.65.01
-# [[ ${ME} == 'gpu-p9-3' ]] && CUDA_VERSION=520.61.05
-[[ ${ME} == 'gpu-p9-3' ]] && CUDA_VERSION=525.60.13
+
+# Check node config for specific drvier version override. This will be in a tag in the node config
+# called nvidia-driver-version. E.g.:
+#   wwctl node set --tag nvidia-driver-version=495.29.05 nodename
+# 
+# Seed the version with a tag from the node config.
+CUDA_VERSION=$(yq ".nodes.${ME}.tags.nvidia-driver-version" < /warewulf/etc/nodes.conf)
+CUDA_DRIVER=${CUDA_DRIVER_PATH}/NVIDIA-Linux-$(arch)-${CUDA_VERSION}.run
+
+if [[ -z ${CUDA_VERSION} ]] || [[ ${CUDA_VERSION} == "null" ]] || [[ ! -f ${CUDA_DRIVER_PATH} ]]; then
+    warn "$0: Node config driver version invalid or missing, falling back to latest found driver."
+    CUDA_VERSION=$(ls -1 ${CUDA_DRIVER_PATH} | grep "NVIDIA-Linux-$(arch)-.*run" | sort -V | tail -1 | sed -e "s/NVIDIA-Linux-$(arch)-\(.*\).run/\1/g")
+    CUDA_DRIVER=${CUDA_DRIVER_PATH}/NVIDIA-Linux-$(arch)-${CUDA_VERSION}.run
+fi
 
 # Locate the driver and associated fabric manager if applicable. 
 # nvidia-fabric-manager-495.29.05-1.x86_64.rpm
-CUDA_DRIVER=${CUDA_DRIVER_PATH}/NVIDIA-Linux-$(arch)-${CUDA_VERSION}.run
 CUDA_FABRIC_MANAGER=${CUDA_DRIVER_PATH}/nvidia-fabric-manager-${CUDA_VERSION}-1.x86_64.rpm
-
+   
 # Optionally configure ourselves to support VirtualGL. Needs turbovnc and virtualGL packages.
 CUDA_VIRTUALGL=false
 
@@ -241,19 +254,26 @@ function cuda_nvidia_xconfig_virtualgl () {
 
 # Install/enable fabric manager.
 function cuda_nvidia_fabric_manager () {
-    # Enable and start fabric manager.
-    if yum -y localinstall ${CUDA_FABRIC_MANAGER}; then
-        systemctl enable nvidia-fabricmanager
-        systemctl start nvidia-fabricmanager
+  # Enable and start fabric manager.
+  local retval=0
+  if [[ ! -f ${CUDA_FABRIC_MANAGER} ]]; then
+    warn "$0: ${CUDA_FABRIC_MANAGER} not found, skipping install of fabric manager."
+    retval=1
+  else
+    if dnf -y localinstall ${CUDA_FABRIC_MANAGER}; then
+      systemctl enable nvidia-fabricmanager
+      systemctl start nvidia-fabricmanager
     else
-        warn "Failed to install nvidia fabric-manager."
+      warn "Failed to install nvidia fabric-manager."
+      retval=1
     fi
+  fi
+  return ${retval}
 }
 
 # Work starts here.
 state_file=/warewulf/var/state/nvidia-gpu.state
 dev_count=$(cuda_count_gpu_devices)
-
 
 if [[ ${dev_count} -gt 0 ]]; then
   warn "Detected $dev_count devices."
@@ -281,19 +301,15 @@ if [[ ${dev_count} -gt 0 ]]; then
     warn "Enabling CUDA persistence daemon."
     cuda_create_users
     cuda_persistence_daemon
+
     # This rpm should not be installed, but just in case.
     systemctl disable dcgm
     systemctl stop dcgm
 
-    # Skip for now, doesn't want to start on the node.
-    # if [[ ${ME} =~ ^gpu-a-* ]]; then
-    #     cuda_nvidia_fabric_manager
-    # fi
-
     touch ${state_file}
   fi
 else
-  warn "No card detected, perhaps CUDA_CARDDB needs to be updated?"
+  warn "$0: No card detected, is ${ME} A CPU node or perhaps CUDA_CARDDB needs to be updated?"
 fi
 
 
