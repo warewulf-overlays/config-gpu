@@ -27,6 +27,7 @@ if [[ -z ${CUDA_VERSION} ]] || [[ ${CUDA_VERSION} == "null" ]] || [[ ! -f ${CUDA
     warn "$0: Node config driver version invalid or missing, falling back to latest found driver."
     CUDA_VERSION=$(ls -1 ${CUDA_DRIVER_PATH} | grep "NVIDIA-Linux-$(arch)-.*run" | sort -V | tail -1 | sed -e "s/NVIDIA-Linux-$(arch)-\(.*\).run/\1/g")
     CUDA_DRIVER=${CUDA_DRIVER_PATH}/NVIDIA-Linux-$(arch)-${CUDA_VERSION}.run
+    [[ -f ${CUDA_DRIVER} ]] || die "$0: Driver file: ${CUDA_DRIVER} not found. Please make sure a driver file is available."
 fi
 
 # Locate the driver and associated fabric manager if applicable. 
@@ -37,8 +38,13 @@ CUDA_FABRIC_MANAGER=${CUDA_DRIVER_PATH}/nvidia-fabric-manager-${CUDA_VERSION}-1.
 CUDA_VIRTUALGL=false
 
 function cuda_create_users () {
+  if ! id cuda > /dev/null 2>&1; then
+    warn "$0: Creating cuda user."
     # We don't really care about uid/gid, let the chips fall where they may. 
     useradd -c "nVidia Driver User" -r -m -d /tmp/cuda -s /bin/nologin cuda
+  else
+    warn "$0: cuda user already exists."
+  fi
 }
 
 # Check if a pci id is a card we recognize.
@@ -101,6 +107,25 @@ function cuda_install_driver_runfile () {
   return $retval
 }
 
+function cuda_uninstall_driver_runfile () {
+  local retval=1 # We assume there is nothing to uninstall
+  
+  # Check for modules, remove if found.
+  if lsmod | grep -q 'nvidia'; then
+    warn "$0: Attempting to remove nvidia modules with modprobe -r"
+    modprobe -r nvidia nvidia_uvm nvidia_modeset nvidia_drm drm_kms_helper drma
+  fi
+
+  # Use uninstall if found, if not fall back to using our current version 
+  # of the runfile.
+  if [[ -f /usr/bin/nvidia-uninstall ]]; then
+    /usr/bin/nvidia-uninstall --silent 
+    retval=$?
+  else
+    bash ${CUDA_DRIVER} --uninstall --silent
+    retval=$?
+  fi
+}
 
 function cuda_install_driver_dnf () {
   local retval=0
@@ -277,6 +302,15 @@ dev_count=$(cuda_count_gpu_devices)
 
 if [[ ${dev_count} -gt 0 ]]; then
   warn "Detected $dev_count devices."
+
+  # Uninstall any old bits we find. This is critical for any 
+  # stateful nodes as teh driver will persist and for some 
+  # reason (at least on Power9) get a version mismatch on 
+  # reboot.
+  if cuda_uninstall_driver_runfile; then
+    warn "$0: Previous GPU driver uninstalled."
+    rm ${state_file}
+  fi
 
   if [[ -f ${state_file} ]]; then
     warn "Previous install of cuda found, not overwriting."
