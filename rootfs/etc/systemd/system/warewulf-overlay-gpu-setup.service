@@ -1,6 +1,5 @@
 [Unit]
 Description=Installs/configures GPU drivers for detected GPUs.
-Requires=systemd-udev-settle.service
 After=systemd-udev-settle.service remote-fs.target local-fs.target network.target
 Before=slurmd.service
 
