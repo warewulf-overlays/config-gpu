@@ -91,21 +91,10 @@ clush -w GPUNODELIST "nvidia-smi -q | grep 'Product Name'" | awk '!($1=$2="")' |
 
 Insert some sample ways to configure Gres here.
 
-### VMware GeForce passthru hints
+### libvirtd/KVM/QEMU
 
-Using VMWare based nodes with a GPU passthru to a GeForce device.
+Insert some examples here.
 
-Host Settings:
-
-* Set host GPU mode to Shared Direct in Graphics tab when·setting up pass-thru.
-
-Guest settings:
-
-* Boot Options | Firmware = EFI
-* svga.present = FALSE  (note this disables the console)
-* hypervisor.cpuid.v0 = FALSE
-* pciPassthru.64bitMMIOSizeGB = 64
-* pciPassthru.use64bitMMIO = TRUE
 
 
 
