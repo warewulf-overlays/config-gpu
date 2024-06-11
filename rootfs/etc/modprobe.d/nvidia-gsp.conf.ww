@@ -1,0 +1,6 @@
+# We may or may not want GSP enabled, in response to 
+# NVRM: Xid (PCI:0000:01:00): 119, pid=271958, name=python, Timeout waiting for RPC from GSP1! Expected function 76 (GSP_RM_CONTROL) (0x2080012c 0x14).
+# https://github.com/NVIDIA/open-gpu-kernel-modules/issues/446#issuecomment-1457790515
+
+# Default to disabled.
+options nvidia NVreg_EnableGpuFirmware={{ if eq "true" .Tags.ovl_gpu_gsp_firmware_enable -}}1{{ else }}0{{- end }}
