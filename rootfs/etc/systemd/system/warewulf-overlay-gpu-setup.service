@@ -6,7 +6,6 @@ Before=slurmd.service
 [Service]
 ExecStart=/warewulf/sbin/service.warewulf-overlay-gpu-setup.sh
 Type=oneshot
+RemainAfterExit=yes 
 
 [Install]
-WantedBy=multi-user.target
-RequiredBy=slurmd.service
