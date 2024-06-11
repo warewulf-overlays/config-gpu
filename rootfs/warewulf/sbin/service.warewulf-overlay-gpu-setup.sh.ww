@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# Source our common warewulf functions
-[[ -f /warewulf/etc/functions ]] && source /warewulf/etc/functions || exit 1
-
-# Script starts here.
-
 # Load our table with all our known/supported GPU cards and the options associated with them
 CARDDB_FILE=/warewulf/etc/warewulf-overlay-gpu-carddb
 [[ -f ${CARDDB_FILE} ]] && source ${CARDDB_FILE} || die "$0: ${CARDDB_FILE} not found."
@@ -14,11 +9,14 @@ CARDDB_FILE=/warewulf/etc/warewulf-overlay-gpu-carddb
 # overlay README.md for details. To use this without Warewulf
 # replace these lines with the desired variable values.
 GPU_CUDA_VERSION={{ if .Tags.ovl_gpu_cuda_version -}}{{ .Tags.ovl_gpu_cuda_version }}{{ else }}latest{{- end }}
-GPU_DRIVER_DISABLE={{ if .Tags.ovl_gpu_driver_disable -}}{{ .Tags.ovl_gpu_driver_disable }}{{ else }}false{{- end }}
+GPU_DRIVER_INSTALL={{ if .Tags.ovl_gpu_driver_install -}}{{ .Tags.ovl_gpu_driver_install }}{{ else }}true{{- end }}
 GPU_DRIVER_VERSION={{ if .Tags.ovl_gpu_driver_version -}}{{ .Tags.ovl_gpu_driver_version }}{{ else }}latest{{- end }}
 GPU_DRIVER_DKMS_DISABLE={{ if .Tags.ovl_gpu_driver_dkms_disable -}}{{ .Tags.ovl_gpu_driver_dkms_disable }}{{ else }}false{{- end }}
 GPU_VIRTUALGL_ENABLE={{ if .Tags.ovl_gpu_virtualgl_enable -}}{{ .Tags.ovl_gpu_virtualgl_enable }}{{ else }}false{{- end }}
+GPU_XORG_ENABLE={{ if .Tags.ovl_gpu_xorg_enable -}}{{ .Tags.ovl_gpu_xorg_enable }}{{ else }}false{{- end }}
 GPU_FABRIC_MANAGER_ENABLE={{ if .Tags.ovl_gpu_fabric_manager_enable -}}{{ .Tags.ovl_gpu_fabric_manager_enable }}{{ else }}false{{- end }}
+GPU_DCGM_ENABLE={{ if .Tags.ovl_gpu_dcgm_enable -}}{{ .Tags.ovl_gpu_dcgm_manager_enable }}{{ else }}false{{- end }}
+GPU_NVIDIA_PEERMEM_ENABLE={{ if .Tags.ovl_gpu_nvidia_peermem_enable -}}{{ .Tags.ovl_gpu_nvidia_peermem_enable }}{{ else }}false{{- end }}
 #####################################################################
 
 #####################################################################
@@ -30,6 +28,31 @@ GPU_FABRIC_MANAGER_ENABLE={{ if .Tags.ovl_gpu_fabric_manager_enable -}}{{ .Tags.
 #####################################################################
 ######################### Functions #################################
 #####################################################################
+
+#####################################################################
+# Issue an error message then exit.
+function die () {
+  if [[ -n $1 ]]; then
+    echo "ERROR: $1" 
+  else 
+    echo "ERROR: Unspecified." 
+  fi
+  if [[ -n $2 ]] && [[ $2 =~ [0-9]* ]] && [[ $2 -gt 0 ]] && [[ $2 -lt 128 ]]; then
+    exit $2
+  else 
+    exit 1
+  fi
+}
+
+#####################################################################
+# Issue a warning, but continue execution.
+function warn () {
+  if [[ -n $1 ]]; then
+    echo "WARNING: $1" 
+  else
+    echo "WARNING: Unspecified." 
+  fi
+}
 
 #####################################################################
 # Check if a pci id is a card we recognize.
@@ -82,10 +105,9 @@ function cuda_check_nouveau () {
 }
 
 #####################################################################
-# Install the driver
-function cuda_install_driver () {
+# Configure the nVidia repos for yum/dnf
+function cuda_configure_repo () {
   local retval=0
-  local module
   ARCH=$( /bin/arch )
   DISTRO=rhel8
   CUDA_REPO=cuda-${DISTRO}-${ARCH}
@@ -96,28 +118,57 @@ function cuda_install_driver () {
     dnf config-manager --enable ${CUDA_REPO} || \
       dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH}/cuda-${DISTRO}.repo
   fi
- 
+  retval=$?
+  return ${retval}
+}
+
+
+#####################################################################
+# Install the driver
+function cuda_install_driver () {
+  local retval=0
+  local module
+  local dcgm
+
+  # Figure out which driver version we are installing. 
   module="nvidia-driver:${GPU_DRIVER_VERSION}"
+
+  # Are we using dkms?
   [[ ${GPU_DRIVER_DKMS_DISABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]] || module+="-dkms"
+
+  # Are we installing the fabric manager?
   [[ ${GPU_FABRIC_MANAGER_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]] && module+="/fm"
 
+  # Are we installing datacenter gpu manager?
+  [[ ${GPU_DCGM_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]] && dcgm="datacenter-gpu-manager"
+
   warn "Install driver module ${module}"
-  dnf -y module install ${module}
+  dnf -y module install ${module} ${dcgm}
   retval=$?
 
   return ${retval}
 }
 
 #####################################################################
+# Install gdrcopy
+# Note, there is no upstream repo so making sure dnf can install this is an
+# exercise for the sysadmin.
+function cuda_install_gdrcopy () {
+    local packages=( gdrcopy gdrcopy-devel gdrcopy-kmod )
+    dnf -y install ${packages[*]}
+    return $?
+}
+
+#####################################################################
 # Configure X for workstation use as physical desktop.
-function cuda_nvidia_xconfig_workstation () {
+function cuda_nvidia_xorg () {
   nvidia-xconfig || return 1
   return 0
 }
 
 #####################################################################
 # Configure GPU for VirtualGL use for virtual desktops.
-function cuda_nvidia_xconfig_virtualgl () {
+function cuda_nvidia_virtualgl () {
   local cuda_num_gpus cuda_busid
   cuda_num_gpus=$(nvidia-xconfig --query-gpu-info | awk '/Number of GPUs:/ {print $4}')
   if [[ ${cuda_num_gpus} -gt 1 ]]; then
@@ -138,48 +189,93 @@ function cuda_nvidia_xconfig_virtualgl () {
   # Configure system for virtualGL
   /opt/VirtualGL/bin/vglserver_config -config +s +f -t 
 
-  # Start display manager
-  systemctl start lightdm
-  systemctl status lightdm
+}
+
+#####################################################################
+# Configure GPU devices and services
+function nvidia_configure_gpus () {
+  # Set up GPU based on detected GPU type
+  if [[ ${dev_count} -gt 0 ]]; then
+    warn "Detected $dev_count devices."
+
+    # nvidia-peermem load.
+    if [[ ${GPU_NVIDIA_PEERMEM_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
+        warn "Loading nvidia-peermem module."
+        lsmod | grep nvidia-peermem || modprobe nvidia-peermem
+    else
+        warn "Skipping load of nvidia-peermem module."
+    fi
+   
+    # gdrcopy
+    cuda_install_gdrcopy
+
+    # Run nvidia-smi, this seems to wake up the GPUs in some cases so that
+    # subsequent services see them properly.
+    nvidia-smi || warn "Error running nvidia-smi."
+   
+    # Start persistenced to keep these things warm and ready for action.
+    systemctl --now enable nvidia-persistenced.service
+    systemctl is-active nvidia-persistenced.service || systemctl start nvidia-persistenced.service
+
+    # Enable/start fabric-manager service.
+    if [[ ${GPU_FABRIC_MANAGER_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
+        warn "Enabling and starting fabric-manager."
+        systemctl enable nvidia-fabricmanager.service
+        # Start of the service has been observed to hang, if it takes longer
+        # than the timeout we'll give up.
+        timeout 30s systemctl start nvidia-fabricmanager.service || \
+          warn "systemctl start nvidia-fabricmanager.service failed."
+    else
+        warn "Skipping setups/start of fabric-manager service."
+    fi
+
+    # As a last step, we run nvidia-smi, just to make sure everything is working.
+    nvidia-smi > /tmp/$(basename $0).nvidia-smi.log 2>&1
+  else
+    warn "No GPU devices detected. Is your device missing from ${CARDDB_FILE}?"
+  fi
 }
 
 #####################################################################
 ########################### __main __ ###############################
 #####################################################################
 # Work starts here.
-state_file=/warewulf/var/state/nvidia-gpu.state
 dev_count=$(cuda_count_gpu_devices)
 
-if [[ ${dev_count} -gt 0 ]]; then
-  warn "Detected $dev_count devices."
-
-  if [[ -f ${state_file} ]]; then
-    warn "Previous install of cuda found, not overwriting. 'rm ${state_file}' to force setup to run."
-  else
-    # Driver install.
+# Install driver if enabled.
+case ${GPU_DRIVER_INSTALL} in 
+  true|force)
+    cuda_configure_repo
     cuda_install_driver
+    ;;
+  false|disable) 
+    warn "gpu_driver_install=${GPU_DRIVER_INSTALL}, aborting GPU driver install and setup."
+    dev_count=0 # Disable device setup.
+    ;;
+  *) 
+    warn "gpu_driver_install value ${GPU_DRIVER_INSTALL} unknown."
+    ;;
+esac
 
-    # Start persistenced to keep these things warm and ready for action.
-    systemctl enable nvidia-persistenced.service
-    systemctl start nvidia-persistenced.service
+# Set up detected devices.
+if [[ dev_count -gt 0 ]]; then 
+  nvidia_configure_gpus
 
-    # Configure for desktop use, depending on how the node will run desktops.
-    if [[ ${GPU_VIRTUALGL_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
-      # Configure for use by VirtualGL
-      cuda_nvidia_xconfig_virtualgl
-    else
-      # Configure first GPU for NoMachine-like physical desktops.
-      cuda_nvidia_xconfig_workstation
-    fi
-
-    # As a last step, we run nvidia-smi, just to make sure everything is working.
-    nvidia-smi > /tmp/$(basename $0).nvidia-smi.log 2>&1
-
-    # Leave a marker that this has already been ran.
-    touch ${state_file}
+  # Configure for potential remote desktop use.
+  # VirtualGL is a superset of XOrg config, if both are enabled we only need to
+  # call the VirtualGL setup.
+  if [[ ${GPU_VIRTUALGL_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
+    # Configure for use by VirtualGL in remote desktops.
+    cuda_nvidia_virtualgl
+  elif [[ ${GPU_XORG_ENABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
+    # Configure first GPU for a physical desktops.
+    cuda_nvidia_xorg
   fi
-else
-  warn "No known GPU detected, perhaps CUDA_CARDDB needs to be updataed?"
-fi
 
+  if [[ ${GPU_DISPLAY_MANAGER} != "" ]]; then
+    # Start selected display manager
+    systemctl start ${GPU_DISPLAY_MANAGER}
+    systemctl status ${GPU_DISPLAY_MANAGER}
+  fi
+fi
 
