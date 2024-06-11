@@ -1,6 +1,6 @@
 # warewulf-overlay-gpu
 
-Reading from a cloned copy? Try `pandoc README.md -t plain`
+Reading from a cloned local copy? Try `pandoc README.md -t plain`
 
 ## Description
 
@@ -9,31 +9,98 @@ Reading from a cloned copy? Try `pandoc README.md -t plain`
 ## Overlay Tags
 
 The following tags can be set in the node config to control the GPU setup:
+### `ovl_gpu_cuda_version`
+
+Specifies a version of CUDA to install, currently not implemented.
+
+Recommendation is to install CUDA in an NFS location that is shared by all
+nodes. See [Lmod](https://lmod.readthedocs.io/en/latest/) for a way to make
+that easy to manage.
+
+### `ovl_gpu_dcgm_manager_enable`
+
+Enable the installation of Datacenter GPU Manager package(s) and start of
+related services.
+
+```
+wwctl node set --tagadd "ovl_gpu_dcgm_manager_enable=true" NODENAME
+```
+
+Defaults to: `false`
+
+### `ovl_gpu_driver_install`
+
+Enable/Disable GPU driver install. If set to `false`/`disable`/`no`, then GPU
+driver install and related setup/configuration will be gracefuly aborted, e.g.
+the setup service will return success without actually installing or
+configuring anything. A use case for this might be a GPU server which will pass
+through GPUs to VMs rather than use them directly from the provisioned OS.
+
+```
+wwctl node set --tagadd "ovl_gpu_driver_install=false" NODENAME
+```
+
+Defaults to: `true`
+
+### `ovl_gpu_virtualgl_enable`
+
+Enables configuration of the node for VirtualGL. Work in progress, expect
+problems and please submit suggestions for improvement.
+
+```
+wwctl node set --tagadd "ovl_gpu_virtualgl_enable=true" NODENAME
+```
+
+Defaults to: `false`
+
+### `ovl_gpu_xorg_enable`
+
+Configure the first GPU for use by Xorg.
+
+```
+wwctl node set --tagadd "ovl_gpu_xorg_enable=true" NODENAME
+```
+
+Defaults to: `false`
+
+### `ovl_gpu_fabric_manager_enable`
+
+Enables installation of Fabric Manager and starts associated services. This is
+only required on systems with NVLink switches (8 GPU SXM systems and up).
+
+TODO: Add an autodetect option to do thei right thing based on the detected
+GPUs and fabrics.
+
+```
+wwctl node set --tagadd "ovl_gpu_fabric_manager_enable=true" NODENAME
+```
+
+Defaults to: `false`
+
+### `ovl_gpu_nvidia_peermem_enable`
+
+Enables loading of the `nvidia-peermem` module. See the the [GPUDirect
+RDMA](https://docs.nvidia.com/cuda/gpudirect-rdma/index.html#nvidia-peermem)
+docs.
+
+```
+wwctl node set --tagadd "ovl_gpu_nvidia_peermem_enable=true" NODENAME
+```
+
+Defaults to: `false`
 
 ### `ovl_gpu_driver_version`
 
 Sets the version of the driver to install. This value should be the
-corresponding ID for a driver branch, see the 
-[CUDA Installaion Guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#precompiled-streams-support-matrix) for additional details.
-For example, to set the version to the 520 stream:
+corresponding ID for a driver branch, see the [CUDA Installaion
+Guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#precompiled-streams-support-matrix)
+for additional details.  For example, to set the version to the 520 stream:
 
 ```
 wwctl node set --tagadd "ovl_gpu_cuda_version=520" NODENAME
 ```
 
 Defaults to: `latest`
-
-### `ovl_gpu_driver_disable`
-
-Gracefully aborts setup of the GPU drivers. Useful for nodes that will pass
-GPUs through to VM guests and for debugging when you want to run the GPU setup
-manually.
-
-```
-wwctl node set --tagadd "ovl_gpu_driver_disable=true" NODENAME
-```
-
-Defaults to `false`
 
 ### `ovl_gpu_driver_dkms_disable`
 
@@ -48,25 +115,16 @@ wwctl node set --tagadd "ovl_gpu_driver_dkms_disable=true" NODENAME
 
 Defaults to `false`
 
-### `ovl_gpu_virtualgl_enable`
-
-Enables configuration of teh node for VirtualGL. Work in progress, expect
-problems and please submit suggestions for improvement.
-
-```
-wwctl node set --tagadd "ovl_gpu_virtualgl_enable=true" NODENAME
-```
-
 ## Repository
 
-The overlay will check the current dnf config for the nVidia repo and use that
+The overlay will check the current `dnf`/`yum` config for the nVidia repo and use that
 if found. If no repo is present it will set up the upstream nVidia repo. This
-allows a local mirror to be pre-configured in the dnf config if desired.
+allows a local mirror to be pre-configured in the `dnf`/`yum` config if desired.
 
 ## The GPU Card Database
 
 The overlay file `./rootfs/warewulf/etc/warewulf-overlay-gpu-carddb` contains
-the PCI IDs of teh cards we recognize and will need to be updated to add new
+the PCI IDs of the cards we recognize and will need to be updated to add new
 cards as needed. The cards are represented by an entry in the bash associative array like:
 
 ```
@@ -84,17 +142,4 @@ clush -w GPUNODELIST lspci -nn | grep -i nvidia | awk '!($1=$2="")'  | sort | un
 # Collect from nvidia-smi, presents a chicken and egg problem but can give better descriptions.
 clush -w GPUNODELIST "nvidia-smi -q | grep 'Product Name'" | awk '!($1=$2="")' | sort | uniq -c | sort
 ```
-
-## App and Use Case Specific Notes
-
-### Slurm
-
-Insert some sample ways to configure Gres here.
-
-### libvirtd/KVM/QEMU
-
-Insert some examples here.
-
-
-
 
