@@ -17,6 +17,7 @@ GPU_XORG_ENABLE={{ if .Tags.ovl_gpu_xorg_enable -}}{{ .Tags.ovl_gpu_xorg_enable 
 GPU_FABRIC_MANAGER_ENABLE={{ if .Tags.ovl_gpu_fabric_manager_enable -}}{{ .Tags.ovl_gpu_fabric_manager_enable }}{{ else }}false{{- end }}
 GPU_DCGM_ENABLE={{ if .Tags.ovl_gpu_dcgm_enable -}}{{ .Tags.ovl_gpu_dcgm_manager_enable }}{{ else }}false{{- end }}
 GPU_NVIDIA_PEERMEM_ENABLE={{ if .Tags.ovl_gpu_nvidia_peermem_enable -}}{{ .Tags.ovl_gpu_nvidia_peermem_enable }}{{ else }}false{{- end }}
+GPU_PCI_DISABLE_ACS={{ if .Tags.ovl_gpu_pci_disable_acs -}}{{ .Tags.ovl_gpu_pci_disable_acs }}{{ else }}false{{- end }}
 #####################################################################
 
 #####################################################################
@@ -237,6 +238,22 @@ function nvidia_configure_gpus () {
 }
 
 #####################################################################
+# Disable ACS
+# See: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html#pci-access-control-services-acs
+function pcie_disable_acs () {
+  for BDF in `lspci -d "*:*:*" | awk '{print $1}'`; do
+    setpci -v -s ${BDF} ECAP_ACS+0x6.w > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+      warn "PCI device: ${BDF} does not support ACS."
+    fi
+    if setpci -v -s ${BDF} ECAP_ACS+0x6.w=0000; then
+      warn "Disabled ACS on PCI switch device: ${BDF}"
+    else
+      warn "Failed to disable ACS on PCI switch device: ${BDF}"
+    fi
+  done
+}
+#####################################################################
 ########################### __main __ ###############################
 #####################################################################
 # Work starts here.
@@ -259,6 +276,12 @@ esac
 
 # Set up detected devices.
 if [[ dev_count -gt 0 ]]; then 
+  # Disable ACS 
+  if [[ ${GPU_PCI_DISABLE_ACS} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]]; then
+    warn "GPU_DISABLE_ACS = ${GPU_DISABLE_ACS}, disabled ACS."
+    pcie_disable_acs
+  fi
+
   nvidia_configure_gpus
 
   # Configure for potential remote desktop use.

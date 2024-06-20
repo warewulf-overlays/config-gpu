@@ -115,6 +115,16 @@ wwctl node set --tagadd "ovl_gpu_driver_dkms_disable=true" NODENAME
 
 Defaults to `false`
 
+### `ovl_gpu_pci_disable_acs`
+
+Disables PCIe ACS support. See [PCI Access Control Services](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html#pci-access-control-services-acs) in the nVidia docs.
+
+```
+wwctl node set --tagadd "ovl_gpu_pci_disable_acs=true" NODENAME
+```
+
+Defaults to: `false`
+
 ## Repository
 
 The overlay will check the current `dnf`/`yum` config for the nVidia repo and use that
