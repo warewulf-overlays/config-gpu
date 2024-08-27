@@ -10,6 +10,7 @@ CARDDB_FILE=/warewulf/etc/warewulf-overlay-gpu-carddb
 # replace these lines with the desired variable values.
 GPU_CUDA_VERSION={{ if .Tags.ovl_gpu_cuda_version -}}{{ .Tags.ovl_gpu_cuda_version }}{{ else }}latest{{- end }}
 GPU_DRIVER_INSTALL={{ if .Tags.ovl_gpu_driver_install -}}{{ .Tags.ovl_gpu_driver_install }}{{ else }}true{{- end }}
+GPU_DRIVER_TYPE={{ if .Tags.ovl_gpu_driver_type -}}{{ .Tags.ovl_gpu_driver_type }}{{ else }}{{- end }}
 GPU_DRIVER_VERSION={{ if .Tags.ovl_gpu_driver_version -}}{{ .Tags.ovl_gpu_driver_version }}{{ else }}latest{{- end }}
 GPU_DRIVER_DKMS_DISABLE={{ if .Tags.ovl_gpu_driver_dkms_disable -}}{{ .Tags.ovl_gpu_driver_dkms_disable }}{{ else }}false{{- end }}
 GPU_VIRTUALGL_ENABLE={{ if .Tags.ovl_gpu_virtualgl_enable -}}{{ .Tags.ovl_gpu_virtualgl_enable }}{{ else }}false{{- end }}
@@ -116,9 +117,12 @@ function cuda_configure_repo () {
   # Make sure we have a repo to install from. This needs some work, including
   # OS detection and better repo error checking.
   if ! dnf repolist --enabled | grep ${CUDA_REPO}; then
-    dnf config-manager --enable ${CUDA_REPO} || \
-      dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH}/cuda-${DISTRO}.repo
+    dnf -y config-manager --enable ${CUDA_REPO} || \
+      dnf -y config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH}/cuda-${DISTRO}.repo
   fi
+
+  # Reset the module
+  dnf -y module reset nvidia-driver
   retval=$?
   return ${retval}
 }
@@ -131,8 +135,24 @@ function cuda_install_driver () {
   local module
   local dcgm
 
-  # Figure out which driver version we are installing. 
+  # Figure out which driver version we are installing. Assume we are installing proprietary drivers.
   module="nvidia-driver:${GPU_DRIVER_VERSION}"
+
+  # Use open drivers? (nVidia you keep using that word open, but I do not think
+  # it means what you think it means.)
+  if  [[ ${GPU_DRIVER_TYPE} =~ [Oo][Pp][Ee][Nn] ]]; then
+    # Use the open version
+    if [[ ${GPU_DRIVER_VERSION} =~ [0-9]+ ]]; then
+      # Use a specific version
+      module="nvidia-driver:${GPU_DRIVER_VERSION}-open"
+    else
+      # Use the latest version.
+      module="nvidia-driver:open"
+    fi
+  else
+    # Use the proprietary driver
+    module="nvidia-driver:${GPU_DRIVER_VERSION}"
+  fi
 
   # Are we using dkms?
   [[ ${GPU_DRIVER_DKMS_DISABLE} =~ [Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee] ]] || module+="-dkms"

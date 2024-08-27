@@ -9,6 +9,29 @@ Reading from a cloned local copy? Try `pandoc README.md -t plain`
 ## Overlay Tags
 
 The following tags can be set in the node config to control the GPU setup:
+
+### `ovl_gpu_driver_type`
+
+Set the nVidia driver type. By default the older proprietary driver will be
+used, setting this tag to `open` will switch to the newer `open` driver. 
+
+```
+wwctl node set --tagadd=ovl_gpu_driver_type=open NODENAME
+```
+
+Defaults to the proprietary driver (no value set).
+
+### `ovl_gpu_gsp_firmware_enable`
+
+Enable/Disable GSP firmware. See `/etc/modprobe.d/nvidia-gsp.conf.ww` where
+this option is conditionally enabled for the loading of the nvidia.ko module.
+
+```
+wwctl node set --tagadd "ovl_gpu_gsp_firmware_enable=true" NODENAME
+```
+
+Defaults to: `false` (disable GSP Firmware)
+
 ### `ovl_gpu_cuda_version`
 
 Specifies a version of CUDA to install, currently not implemented.
