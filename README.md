@@ -10,6 +10,20 @@ Reading from a cloned local copy? Try `pandoc README.md -t plain`
 
 The following tags can be set in the node config to control the GPU setup:
 
+### `ovl_gpu_driver_install`
+
+Enable/Disable GPU driver install. If set to `false`/`disable`/`no`, then GPU
+driver install and related setup/configuration will be gracefuly aborted, e.g.
+the setup service will return success without actually installing or
+configuring anything. A use case for this might be a GPU server which will pass
+through GPUs to VMs rather than use them directly from the provisioned OS.
+
+```
+wwctl node set --tagadd "ovl_gpu_driver_install=false" NODENAME
+```
+
+Defaults to: `true`
+
 ### `ovl_gpu_driver_type`
 
 Set the nVidia driver type. By default the older proprietary driver will be
@@ -50,20 +64,6 @@ wwctl node set --tagadd "ovl_gpu_dcgm_manager_enable=true" NODENAME
 ```
 
 Defaults to: `false`
-
-### `ovl_gpu_driver_install`
-
-Enable/Disable GPU driver install. If set to `false`/`disable`/`no`, then GPU
-driver install and related setup/configuration will be gracefuly aborted, e.g.
-the setup service will return success without actually installing or
-configuring anything. A use case for this might be a GPU server which will pass
-through GPUs to VMs rather than use them directly from the provisioned OS.
-
-```
-wwctl node set --tagadd "ovl_gpu_driver_install=false" NODENAME
-```
-
-Defaults to: `true`
 
 ### `ovl_gpu_virtualgl_enable`
 
